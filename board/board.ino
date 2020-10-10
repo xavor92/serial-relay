@@ -144,6 +144,7 @@ void loop() {
         } else {
           debugln("Invalid char, back to WAIT_FOR_START");
           state = WAIT_FOR_START;
+          Serial.write("ERR\n");
         }
         break;
       case READ_VALUE:
@@ -159,11 +160,15 @@ void loop() {
             debug(", value ");
             debug(channel);
             debugln(", back to WAIT_FOR_START");
+            Serial.write("ERR\n");
+          } else {
+            Serial.write("OK\n");
           }
           state = WAIT_FOR_START;
         } else {
           debugln("Invalid char, back to WAIT_FOR_START");
           state = WAIT_FOR_START;
+          Serial.write("ERR\n");
         }
         break;
     }

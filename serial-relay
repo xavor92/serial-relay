@@ -1,5 +1,108 @@
 #!/usr/bin/env python3
 
+import configparser
+import os
 import serial
+import shutil
+import sys
+import time
 
-SERIAL_PORT = "/dev/ttyUSB0"
+
+CONFIG_PATH = "~/.serial-relay"
+BAUD = 115200
+
+
+class ControllerError(Exception):
+    pass
+
+
+def eprint(*args, **kwargs):
+    print(*args, file=sys.stderr, **kwargs)
+
+
+def help():
+    help_text = """Usage:
+{} <CHANNEL> <STATE>
+
+Set CHANNEL to STATE
+
+CHANNEL     either an integer or an alias defined in the settings
+STATE       one of ON, OFF, 1, 0
+
+Alias as well as the controller port can be defined in .serial-relay, which
+will be created on the first start. To reset settings, simply delete the file
+and launch again to recreate with default settings.
+""".format(os.path.basename(__file__))
+    print(help_text)
+
+def load_conf():
+    custom_conf_path = os.path.expanduser(CONFIG_PATH)
+    if not os.path.isfile(custom_conf_path):
+        script_dir = os.path.dirname(os.path.realpath(__file__))
+        default_ini_path = os.path.join(script_dir, 'defaults.ini')
+        shutil.copy(default_ini_path, custom_conf_path)
+        print("Copied the default config to {}. Edit file to setup serial-relay".format(custom_conf_path))
+        sys.exit(1)
+
+    config = configparser.ConfigParser()
+    config.read(custom_conf_path)
+
+    return config
+
+
+def set_output(connection, output, active):
+        command = ':{}={};'.format(output, 1 if active else 0).encode()
+        connection.write(command)
+
+        # check response in a small non-blocking loop to exit as soon as we get the response
+        start_time = time.time()
+        data = bytearray()
+        while True:
+            data = data + connection.read(1)
+            if b'OK' in data:
+                return
+            if b'ERR' in data:
+                raise ControllerError("Error: Controller returned ERR")
+            if time.time() > start_time + 1:
+                raise ControllerError("Error: No response from controller")
+
+
+if __name__ == "__main__":
+    if len(sys.argv) != 3:
+        help()
+        sys.exit(1)
+    config = load_conf()
+    port = config['BASICS']['Port']
+
+    # check if there is a for the channel
+    channel = sys.argv[1]
+    try:
+        channel = config['MAPPINGS'][channel]
+    except KeyError:
+        # we also accept integers as direct args
+        try:
+            channel = int(channel)
+        except ValueError:
+            eprint("Error: Channel '{}' is not a valid channel".format(channel))
+            sys.exit(1)
+
+    # input for state can either be 0/1 or ON/OFF
+    state = sys.argv[2].lower()
+    if state in ['0', 'off']:
+        state = False
+    if state in ['1', 'on']:
+        state = True
+    if type(state) != bool:
+        eprint("Error: State '{}' is not a valid State".format(state))
+        sys.exit(1)
+
+    try:
+        with serial.Serial(port, BAUD, timeout=0) as con:
+            set_output(con, channel, state)
+    except ControllerError as e:
+        eprint(e)
+        sys.exit(1)
+
+    sys.exit(0)
+
+

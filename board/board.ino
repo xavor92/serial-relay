@@ -4,11 +4,13 @@
   (C) 2020 Oliver Westermann
 */
 
+
 /* Settings */
-#define DEBUG
-//#undef DEBUG
+//#define DEBUG
+#undef DEBUG
 #define ACTIVE_POL    LOW
 #define INACTIVE_POL  HIGH
+
 
 /* Debug print helpers */
 #ifdef DEBUG
@@ -19,9 +21,11 @@
 #define debugln(...) do{ } while ( false )
 #endif
 
+
 /* special bytes for the protocol, check README.md for details */
 const char start_byte = ':';
 const char end_byte = ';';
+
 
 /* channel mapping to Arduino digital outputs
  *   channel_mapping[channel] = digital output
@@ -37,31 +41,16 @@ int channel_mapping[] {
   9
 };
 
+
 typedef enum state {
   WAIT_FOR_START,
   READ_CHANNEL,
   READ_VALUE,
 } State;
 
-// the setup function runs once when you press reset or power the board
-void setup() {
-  Serial.begin(115200);
-  while (!Serial) {
-    ; // wait for serial port to connect. Needed for native USB port only
-  }
-  int i;
-  pinMode(LED_BUILTIN, OUTPUT);
-  for (i = 2; i <= 9; i++) {
-    digitalWrite(i, HIGH);
-    pinMode(i, OUTPUT);
-  }
-  while (!Serial) {
-    ; // wait for serial port to connect. Needed for native USB port only
-  }
-}
 
 /**
- * @brief Update a number by "appending" a char
+ * Update a number by "appending" a char
  *
  * Used when a number is provided char-by-char over a serial connection. Append 'new_char'
  * to the int number
@@ -79,18 +68,55 @@ int update_number_by_char(int *number, char new_char) {
   }
 }
 
-void set_channel(int channel, int state) {
-  if (state)
+
+/**
+ * Set channel to a value
+ *
+ * Polarity can be influenced by the ACTIVE_POL/INACTIVE_POL defines
+ * 
+ * @param channel   Channel to update
+ * @param state     must be 1 or 0
+ * @return          0 in case of success, -1 for invalid channel, -2 for invalid state
+ */
+int set_channel(int channel, int state) {
+  size_t channel_count = sizeof(channel_mapping)/sizeof(channel_mapping[0]);
+  if (channel > channel_count)
+    return -1;
+  
+  if (state == 1) {
     digitalWrite(channel_mapping[channel], ACTIVE_POL);
-  else
+    return 0;
+  } else if (state == 0) {
     digitalWrite(channel_mapping[channel], INACTIVE_POL);
+    return 0;
+  }
+  return -2;
 }
 
-// the loop function runs over and over again forever
+
+/* Arduino setup() */
+void setup() {
+  Serial.begin(115200);
+  while (!Serial) {
+    ; // wait for serial port to connect. Needed for native USB port only
+  }
+  int i;
+  pinMode(LED_BUILTIN, OUTPUT);
+  for (i = 2; i <= 9; i++) {
+    digitalWrite(i, HIGH);
+    pinMode(i, OUTPUT);
+  }
+  while (!Serial) {
+    ; // wait for serial port to connect. Needed for native USB port only
+  }
+}
+
+
+/* Main loop */
 void loop() {
   char in;
   static State state = WAIT_FOR_START;
-  static int channel = 0;
+  static int channel = 0, value = 0;
 
   in = Serial.read();
   if (in > 0) {
@@ -102,6 +128,7 @@ void loop() {
         if (in == start_byte) {
           state = READ_CHANNEL;
           channel = 0;
+          value = 0;
           debugln("New State: READ_CHANNEL");
         }
         break;
@@ -122,12 +149,23 @@ void loop() {
       case READ_VALUE:
         debug("Handling for READ_VALUE\nChannel:");
         debugln(channel);
-        if (in == end_byte) {
-          debugln("READ_CHANNEL: TBD\nNew State: WAIT_FOR_START");
+        if (in == '0' || in == '1') {
+          value = in - '0';
+        } else if (in == end_byte) {
+          /* time for some action */
+          if (set_channel(channel, value)) {
+            debug("set_channel failed for channel ");
+            debug(channel);
+            debug(", value ");
+            debug(channel);
+            debugln(", back to WAIT_FOR_START");
+          }
+          state = WAIT_FOR_START;
+        } else {
+          debugln("Invalid char, back to WAIT_FOR_START");
           state = WAIT_FOR_START;
         }
         break;
     }
   }
-
 }
